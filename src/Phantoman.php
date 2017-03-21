@@ -16,13 +16,18 @@ use Codeception\Exception\ExtensionException;
 class Phantoman extends \Codeception\Platform\Extension
 {
     // list events to listen to
-    static $events = array(
+    protected static $events = array(
         'module.init' => 'moduleInit',
+        'test.after' => 'testAfter',
     );
 
     private $resource;
 
     private $pipes;
+
+    private $runForCurrentSuite = true;
+
+    private $testsCounter = 1;
 
     public function __construct($config, $options)
     {
@@ -158,7 +163,7 @@ class Phantoman extends \Codeception\Platform\Extension
                 if ($i == $max_checks - 1 && proc_get_status($this->resource)['running'] == true) {
                     $this->writeln('');
                     $this->writeln('Unable to properly shutdown PhantomJS server');
-                    unset($this->resource);
+                    $this->resource = null;
                     break;
                 }
 
@@ -166,7 +171,7 @@ class Phantoman extends \Codeception\Platform\Extension
                 if (proc_get_status($this->resource)['running'] == false) {
                     $this->writeln('');
                     $this->writeln('PhantomJS server stopped');
-                    unset($this->resource);
+                    $this->resource = null;
                     break;
                 }
 
@@ -262,7 +267,6 @@ class Phantoman extends \Codeception\Platform\Extension
      */
     public function moduleInit(\Codeception\Event\SuiteEvent $e)
     {
-        // Check if PhantomJS should only be started for specific suites
         if (isset($this->config['suites'])) {
             if (is_string($this->config['suites'])) {
                 $suites = [$this->config['suites']];
@@ -273,11 +277,35 @@ class Phantoman extends \Codeception\Platform\Extension
             // If the current suites aren't in the desired array, return without starting PhantomJS
             if (!in_array($e->getSuite()->getBaseName(), $suites)
                 && !in_array($e->getSuite()->getName(), $suites)) {
+                $this->runForCurrentSuite = false;
+
                 return;
             }
         }
 
+        $this->runForCurrentSuite = true;
+
         // Start the PhantomJS server
         $this->startServer();
+    }
+
+    /**
+     * Test After
+     */
+    public function testAfter(\Codeception\Event\TestEvent $e)
+    {
+        if (!$this->runForCurrentSuite) {
+            return;
+        }
+
+        $this->testsCounter++;
+
+        if (isset($this->config['restartAfterTests']) && $this->testsCounter > $this->config['restartAfterTests']) {
+            $this->writeln('Restarting PhantomJS');
+            // Restart the server
+            $this->testsCounter = 1;
+            $this->stopServer();
+            $this->startServer();
+        }
     }
 }
